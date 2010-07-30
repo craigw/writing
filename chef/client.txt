@@ -1,0 +1,62 @@
+Version controlled configuration - Chef Clients
+===============================================
+
+WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING
+
+This was used for Chef 0.8. It will probably need to be updated for 0.9.
+
+WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING
+
+
+You'll need to do this for each box you control that's not the Chef server. It
+only needs to be done once on each box. We setup the box to talk to the chef 
+server. After that all system setup and configuration type tasks should be 
+done through Chef.
+
+SSH into your new box and do these things:
+
+  sudo apt-get install curl --yes
+
+  # Add the Opscode APT repository so we can get chef goodies.
+  sudo su -c 'echo "deb http://apt.opscode.com/ `lsb_release -sc` universe" > /etc/apt/sources.list.d/opscode.list'
+  # Add the Opscode key so we can verify the packages
+  sudo apt-key adv --recv-keys --keyserver keyserver.ubuntu.com         2940ABA983EF826A |sudo apt-key add -
+
+  # Add jtimberman's PPA for Opscode Ubuntu packages so we can get Chef 0.8 packages
+  sudo su -c 'echo "deb http://ppa.launchpad.net/jtimberman/opschef/ubuntu `lsb_release -sc` main
+  deb-src http://ppa.launchpad.net/jtimberman/opschef/ubuntu `lsb_release -sc` main" > /etc/apt/sources.list.d/ppa-chef.list'
+  # Add the PPA key so we can verify the packages
+  sudo apt-key adv --recv-keys --keyserver keyserver.ubuntu.com         2179D1803F95EA18 |sudo apt-key add -
+
+  # Enable multiverse if it's not already enabled by doing this:
+  # sudo su -c 'echo "deb http://gb.archive.ubuntu.com/ubuntu/ `lsb_release -sc` multiverse
+  # deb-src http://gb.archive.ubuntu.com/ubuntu/ `lsb_release -sc` multiverse
+  # deb http://gb.archive.ubuntu.com/ubuntu/ `lsb_release -sc`-updates multiverse
+  # deb-src http://gb.archive.ubuntu.com/ubuntu/ `lsb_release -sc`-updates multiverse
+  # deb http://security.ubuntu.com/ubuntu `lsb_release -sc`-security multiverse
+  # deb-src http://security.ubuntu.com/ubuntu `lsb_release -sc`-security multiverse" > /etc/apt/sources.list.d/multiverse.list'
+
+  # Fetch the latest indexes from the apt repositories we have configured
+  sudo apt-get update
+
+  # Install the Chef client
+  echo "chef chef/chef_server_url string http://chef.xeriom.net:4000" | \
+       sudo debconf-set-selections
+  sudo apt-get install chef rubygems ohai ruby1.8-dev --yes
+
+  # As part of the Chef client registration process we need to validate the 
+  # client account. This can all be done automatically as long as we copy from 
+  # the chef server to the new client the file /etc/chef/validation.pem. You 
+  # should treat this file like a root password for the entire 
+  # infrastructure... set your umask appropriately before copying it, and 
+  # don't leave it lying around anywhere. Copy the file to 
+  # /etc/chef/validation.pem now.
+
+  # Run the chef-client for the first time to make sure it's registered
+  sudo chef-client
+  # It should either say that the Chef run completed or give you an error 
+  # message.
+
+  # That's it, the Chef client has been registered. Now delete that validation 
+  # key!
+  sudo rm /etc/chef/validation.pem

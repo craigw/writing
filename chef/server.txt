@@ -1,0 +1,190 @@
+Your First Node - The Chef Server
+=================================
+
+WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING
+
+This was used for Chef 0.8. It will probably need to be updated for 0.9.
+
+WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING
+
+This is almost a bootstrap stage... but you may need to do it more than once.
+If the cluster dies totally or needs to be setup fresh, this is where you
+start. You'll only need to do this for the first node as it will become the
+Chef server. Subsequent nodes will talk to this one and setup of those will be
+totally automated.
+
+SSH into your new box and do these things:
+
+  sudo apt-get install curl --yes
+
+  # Add the Opscode APT repository so we can get chef goodies.
+  sudo su -c 'echo "deb http://apt.opscode.com/ `lsb_release -sc` universe" > /etc/apt/sources.list.d/opscode.list'
+  # Add the Opscode key so we can verify the packages
+  curl http://apt.opscode.com/packages@opscode.com.gpg.key | sudo apt-key add -
+
+  # Add jtimberman's PPA for Opscode Ubuntu packages so we can get Chef 0.8 packages
+  sudo su -c 'echo "deb http://ppa.launchpad.net/jtimberman/opschef/ubuntu `lsb_release -sc` main
+  deb-src http://ppa.launchpad.net/jtimberman/opschef/ubuntu `lsb_release -sc` main" > /etc/apt/sources.list.d/ppa-chef.list'
+  # Add the PPA key so we can verify the packages
+  sudo apt-key adv --recv-keys --keyserver keyserver.ubuntu.com         2179D1803F95EA18 |sudo apt-key add -
+
+  # Enable multiverse - some components have dependencies which can't be
+  # satisfied from the normal free Canonical package repositories.
+  sudo su -c 'echo "deb http://gb.archive.ubuntu.com/ubuntu/ `lsb_release -sc` multiverse
+  deb-src http://gb.archive.ubuntu.com/ubuntu/ `lsb_release -sc` multiverse
+  deb http://gb.archive.ubuntu.com/ubuntu/ `lsb_release -sc`-updates multiverse
+  deb-src http://gb.archive.ubuntu.com/ubuntu/ `lsb_release -sc`-updates multiverse
+  deb http://security.ubuntu.com/ubuntu `lsb_release -sc`-security multiverse
+  deb-src http://security.ubuntu.com/ubuntu `lsb_release -sc`-security multiverse" > /etc/apt/sources.list.d/multiverse.list'
+
+  # Fetch the latest indexes from the apt repositories we have configured
+  sudo apt-get update
+
+  PASSWORD=`openssl rand -base64 48 | sed 's/[^a-zA-Z0-9]//g'`
+  echo "chef-solr chef-solr/amqp_password password $PASSWORD" | sudo \
+       debconf-set-selections
+  echo "chef chef/chef_server_url string http://chef.xeriom.net:4000" | \
+       sudo debconf-set-selections
+  sudo apt-get install chef chef-server rubygems ohai ruby1.8-dev --yes
+
+  # FIXME: I should really set umask before creating the file rather than
+  #        running chmod afterwards to be more secure.
+  VALIDATION_TOKEN=`openssl rand -base64 48 | sed 's/[^a-zA-Z0-9]//g'`
+  sudo sh -c "echo $VALIDATION_TOKEN > /etc/chef/validation_token"
+  sudo chmod 0600 /etc/chef/validation_token
+  sudo sh -c "echo validation_token \'$VALIDATION_TOKEN\' >> /etc/chef/server.rb"
+  sudo /etc/init.d/chef-server restart
+
+  # Make sure Solr will return data from searches. This simulates a search for
+  # nodes with any role in their run_list and should return a clean HTTP/1.1
+  # 200 header:
+  curl -I "http://127.0.0.1:8983/solr/select?indent=off&start=0&q=run_list:role*&wt=ruby&fq=%2BX_CHEF_database_CHEF_X:chef+%2BX_CHEF_type_CHEF_X:node&rows=20"
+
+  # Okay, so, Chef is now running. There's a server waiting for clients. It'd
+  # be super to manage the Chef server with Chef just like we'll manage
+  # everything else so let's do that.
+
+  # Register this client with the server
+  sudo chef-client -K -V /etc/chef/validation_token
+  # Check that registration worked. This should run without error (the warning
+  # about the run list being empty is expected):
+  sudo chef-client
+  # Start the client as a daemon - checks every 30 minutes for updates.
+  sudo /etc/init.d/chef-client restart
+
+  # Solr can take a while to update so force it to do that now by restarting.
+  # Solr takes a while to stop but the init scripts don't seem to take that
+  # into account when restarting so we'll have to stop, wait and start by
+  # hand. Ugh.
+  sudo /etc/init.d/chef-solr stop
+  sleep 5
+  sudo /etc/init.d/chef-solr start
+  sleep 15
+
+  # Chef Server now has a client to manage - itself - but nothing to manage on
+  # it. We should really send some cookbooks to the server.
+  #
+  # To manage the cookbooks (and more!) you'll need to create a Chef account
+  # for yourself. On the Chef server run this:
+
+    sudo su -
+    knife configure --initial
+
+  # You can use the default values for everything it asks except your
+  # username:
+  #
+  #   Your chef server URL? [http://localhost:4000]
+  #   Select a user name for your new client: [rails] admin
+  #   Your existing admin client user name? [chef-webui]
+  #   The location of your existing admin key? [/etc/chef/webui.pem]
+  #   Your validation client user name? [chef-validator]
+  #   The location of your validation key? [/etc/chef/validation.pem]
+  #   Path to a chef repository (or leave blank)?
+  #
+  # Now create yourself a user then drop out of the root shell:
+
+    export EDITOR=nano
+    knife client create craig --admin --file ~rails/chef-craig.pem
+    exit
+
+  # Now copy the PEM file from ~rails/chef-*.pem on the Chef server to your
+  # laptop and remove it from the Chef server. Do this on your laptop:
+
+    # FIXME: I should set umask here to be more secure than chmod afterwards.
+    [ -d ~/.chef/ ] && mv ~/.chef ~/.chef-`date +%s.%S`
+    mkdir ~/.chef/
+    scp -o "User rails" chef.xeriom.net:~/chef-*.pem ~/.chef
+    chmod -R go-wrx ~/.chef
+    mv ~/.chef/chef-*.pem ~/.chef/`whoami`.pem
+
+  # Then this on the server:
+
+    sudo rm -r ~/chef-*.pem
+
+  # To manage the software on our servers we'll need some recipes. Luckily,
+  # Mint provided a basic set which we've built upon. You should check these
+  # out to your laptop now. You may need to add yourself to the
+  # xeriom/chef-repo project on GitHub before you do this.
+
+    git clone git@github.com:Picklive/chef-repo.git
+
+  # Take a note of the location it's checked out to. Knife needs to know this
+  # in the next step.
+  #
+  # Now configure knife on your laptop to point to the Chef server you just
+  # setup and the version controlled cookbooks:
+
+    knife configure
+
+  # Check knife has been configured properly by asking it to list all your
+  # nodes:
+
+    knife node list
+
+  # You should get back the hostname of the Chef server. Eventually this will
+  # list all nodes that the Chef server manages.
+  #
+  # Now check knife can search (to see if Solr has indexed the new node
+  # properly):
+
+    knife search node "*:*"
+
+  # It should return a bunch of details about the Chef server. If it returns#
+  # an empty set, ask it to reindex and try again in a few minutes:
+
+    knife index rebuild -y
+
+  # If it still returns an empty result set after a few minutes then you'll
+  # need to investigate further. Java and Solr on Ubuntu are /evil/ and can
+  # break in lots of exciting ways. Please document the breakage and the fix
+  # as you discover it.
+  #
+  # Searching is really powerful, and has a lot of uses. If it doesn't work
+  # properly then you'll be missing out on a rather awesome component of Chef.
+  #
+  # Now we seed the Chef server with cookbooks. First, we upload all the
+  # Opscode cookbooks so we have a lot of common software:
+
+    git clone http://github.com/opscode/cookbooks.git
+    knife cookbook upload -a --cookbook-path ./cookbooks
+
+  # It will take a while but you only need to send all these cookbooks once.
+  #
+  # Once that's done we upload the Picklive cookbooks:
+
+    knife cookbook upload -a
+
+  # Just to make sure the 404s shown there weren't a problem I ran both again
+  # which seemed to make the 404s go away.
+
+    knife cookbook upload -a --cookbook-path ./cookbooks
+    knife cookbook upload -a
+
+  # In the future we'll just send the cookbooks we change so it'll be much
+  # faster to upload them.
+  #
+  # That's pretty much it now. You're setup to use Chef to manage your
+  # infrastructure by working with Knife on your laptop.
+  #
+  # Next step is doc/CHEF_CLIENT file which will explain how to setup another
+  # node to use this Chef server for configuration.
