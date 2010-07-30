@@ -1,0 +1,32 @@
+Some pet peeves of mine are about working with arrays.
+
+Ask an array if it's empty. Don't check if it has a size greater than
+zero.
+
+    bookmarks.empty?    # Do this.
+    bookmarks.size == 0 # ARGH! NO!
+
+If you want to check if an array is not empty, consider asking if it
+contains anything:
+
+    bookmarks.any?     # Do this.
+    bookmarks.size > 0 # No! Bad panda!
+
+Don't check if it's empty before iterating over it unless you need to do
+something with the empty case.
+
+    if bookmarks.any? # Pointless if statement
+      render :partial => bookmarks
+    end
+
+This does the same thing:
+
+    render :partial => bookmarks
+
+This is acceptable:
+
+    if bookmarks.any? # Yes, okay then, this works
+      render :partial => bookmarks
+    else
+      render :partial => "no_bookmarks"
+    end
